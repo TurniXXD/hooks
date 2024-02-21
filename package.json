@@ -1,0 +1,38 @@
+{
+  "name": "@turnix/hooks",
+  "version": "1.0.0",
+  "description": "Set of useful hooks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TurniXXD/hooks.git"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "rollup -c --bundleConfigAsCjs",
+    "start": "rollup -c --bundleConfigAsCjs -w"
+  },
+  "author": "turnix",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "react",
+    "react hooks",
+    "typescript",
+    "npm"
+  ],
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.57",
+    "babel-core": "^6.26.3",
+    "babel-runtime": "^6.26.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "rollup": "^4.12.0",
+    "rollup-plugin-typescript2": "^0.36.0",
+    "typescript": "^5.3.3"
+  }
+}
