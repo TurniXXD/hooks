@@ -1,14 +1,25 @@
-import { useRef, useState, useEffect, RefObject } from 'react';
+import {
+  useRef,
+  useState,
+  useEffect,
+  RefObject,
+  useCallback,
+  MutableRefObject,
+} from 'react';
+import { useDebouncedCallback } from 'use-debounce';
 
-const MIN_SWIPE_DISTANCE = 50;
+const MIN_SWIPE_DISTANCE = 150;
 
 interface TouchCoordinates {
   x: number;
   y: number;
 }
 
-interface UseSwipeOptions {
+interface UseSwipeOptions<T extends HTMLElement = HTMLDivElement> {
   minSwipeDistance?: number;
+  keepUpdatedState?: boolean;
+  ref?: MutableRefObject<T>;
+  useDocument?: boolean;
 }
 
 interface SwipeInfo {
@@ -16,6 +27,11 @@ interface SwipeInfo {
   isSwipeRight: boolean;
   isSwipeUp: boolean;
   isSwipeDown: boolean;
+}
+
+interface UseSwipe<T extends HTMLElement = HTMLDivElement> {
+  ref: RefObject<T>;
+  swipeInfo: SwipeInfo;
 }
 
 /**
@@ -28,15 +44,19 @@ interface SwipeInfo {
  * @template T - The type of the HTML element reference. Defaults to `HTMLDivElement`.
  *
  * @param options - Optional configuration options for the hook.
- * @param options.minSwipeDistance - Minimum distance (in pixels) for a swipe to be considered.
+ * @param options.minSwipeDistance - Minimum distance (in pixels) for a swipe to be considered. Defaults to `150`.
+ * @param options.keepUpdatedState - Prevent resetting values to initial value after update.
+ * @param options.ref - External ref, if not specified hook ref will be used.
+ * @param options.useDocument - Apply the touch event listeners to document object instead of a single element,
+ *  if specified, it takes precedence over all refs.
  *
- * @returns An array containing:
+ * @returns An object containing:
  * - `ref`: A React ref that should be attached to the target HTML element.
- * - `swipeInfo`: An object with properties indicating the direction of the swipe.
- *   - `isSwipeLeft`: A boolean indicating whether a left swipe has occurred.
- *   - `isSwipeRight`: A boolean indicating whether a right swipe has occurred.
- *   - `isSwipeUp`: A boolean indicating whether an upward swipe has occurred.
- *   - `isSwipeDown`: A boolean indicating whether a downward swipe has occurred.
+ * - `swipeInfo`: An object with boolean properties indicating swipe directions:
+ *    - `isSwipeLeft`: A boolean indicating whether a left swipe has occurred.
+ *    - `isSwipeRight`: A boolean indicating whether a right swipe has occurred.
+ *    - `isSwipeUp`: A boolean indicating whether an upward swipe has occurred.
+ *    - `isSwipeDown`: A boolean indicating whether a downward swipe has occurred.
  *
  * @example
  * ```tsx
@@ -46,46 +66,27 @@ interface SwipeInfo {
  *   const [ref, { isSwipeLeft, isSwipeRight, isSwipeUp, isSwipeDown }] = useSwipe();
  *
  *   return (
-      <div ref={ref}>Swipable section</div>
+      <div ref={ref}>Swipable element</div>
  *   );
  * };
  * ```
  */
 export const useSwipe = <T extends HTMLElement = HTMLDivElement>(
-  options?: UseSwipeOptions,
-): [RefObject<T>, SwipeInfo] => {
+  options?: UseSwipeOptions<T>,
+): UseSwipe<T> => {
   const minSwipeDistance = options?.minSwipeDistance ?? MIN_SWIPE_DISTANCE;
   const ref = useRef<T>(null);
   const [touchStart, setTouchStart] = useState<TouchCoordinates | null>(null);
   const [touchEnd, setTouchEnd] = useState<TouchCoordinates | null>(null);
-  const [swipeInfo, setSwipeInfo] = useState<SwipeInfo>({
+  const initialSwipeInfo = {
     isSwipeLeft: false,
     isSwipeRight: false,
     isSwipeUp: false,
     isSwipeDown: false,
-  });
-
-  const onTouchStart = (e: globalThis.TouchEvent) => {
-    setTouchEnd(null);
-    setTouchStart({
-      x: e.targetTouches[0].clientX,
-      y: e.targetTouches[0].clientY,
-    });
   };
+  const [swipeInfo, setSwipeInfo] = useState<SwipeInfo>(initialSwipeInfo);
 
-  const onTouchMove = (e: globalThis.TouchEvent) => {
-    setTouchEnd({
-      x: e.targetTouches[0].clientX,
-      y: e.targetTouches[0].clientY,
-    });
-  };
-
-  const onTouchEnd = () => {
-    if (!touchStart || !touchEnd) return;
-
-    const deltaX = touchStart.x - touchEnd.x;
-    const deltaY = touchStart.y - touchEnd.y;
-
+  const updateSwipeInfo = (deltaX: number, deltaY: number) => {
     setSwipeInfo({
       isSwipeLeft: deltaX > minSwipeDistance,
       isSwipeRight: deltaX < -minSwipeDistance,
@@ -93,21 +94,76 @@ export const useSwipe = <T extends HTMLElement = HTMLDivElement>(
       isSwipeDown: deltaY < -minSwipeDistance,
     });
 
-    setTouchStart(null);
-    setTouchEnd(null);
+    !options?.keepUpdatedState &&
+      setTimeout(() => setSwipeInfo(initialSwipeInfo), 100);
   };
 
+  const debouncedStateUpdate = useDebouncedCallback(updateSwipeInfo, 200);
+  useEffect(() => () => debouncedStateUpdate.cancel(), [debouncedStateUpdate]);
+
+  const onTouchStart = useCallback((e: globalThis.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart({
+      x: e.targetTouches[0].clientX,
+      y: e.targetTouches[0].clientY,
+    });
+  }, []);
+
+  const onTouchMove = useCallback((e: globalThis.TouchEvent) => {
+    setTouchEnd({
+      x: e.targetTouches[0].clientX,
+      y: e.targetTouches[0].clientY,
+    });
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    if (!touchStart || !touchEnd) return;
+
+    const deltaX = touchStart.x - touchEnd.x;
+    const deltaY = touchStart.y - touchEnd.y;
+
+    debouncedStateUpdate(deltaX, deltaY);
+
+    setTouchStart(null);
+    setTouchEnd(null);
+  }, [touchStart, touchEnd, debouncedStateUpdate]);
+
   useEffect(() => {
-    ref.current?.addEventListener('touchstart', onTouchStart);
-    ref.current?.addEventListener('touchmove', onTouchMove);
-    ref.current?.addEventListener('touchend', onTouchEnd);
+    if (options?.useDocument) {
+      document.addEventListener('touchstart', onTouchStart);
+      document.addEventListener('touchmove', onTouchMove);
+      document.addEventListener('touchend', onTouchEnd);
 
-    return () => {
-      ref.current?.removeEventListener('touchstart', onTouchStart);
-      ref.current?.removeEventListener('touchmove', onTouchMove);
-      ref.current?.removeEventListener('touchend', onTouchEnd);
-    };
-  }, [ref, onTouchStart, onTouchMove, onTouchEnd]);
+      return () => {
+        document.removeEventListener('touchstart', onTouchStart);
+        document.removeEventListener('touchmove', onTouchMove);
+        document.removeEventListener('touchend', onTouchEnd);
+      };
+    }
 
-  return [ref, swipeInfo];
+    const swipableElement = options?.ref?.current ?? ref.current;
+
+    if (swipableElement) {
+      swipableElement.addEventListener('touchstart', onTouchStart);
+      swipableElement.addEventListener('touchmove', onTouchMove);
+      swipableElement.addEventListener('touchend', onTouchEnd);
+
+      return () => {
+        swipableElement.removeEventListener('touchstart', onTouchStart);
+        swipableElement.removeEventListener('touchmove', onTouchMove);
+        swipableElement.removeEventListener('touchend', onTouchEnd);
+      };
+    }
+
+    return () => {}
+  }, [
+    ref,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+    options?.ref,
+    options?.useDocument,
+  ]);
+
+  return { ref, swipeInfo };
 };
